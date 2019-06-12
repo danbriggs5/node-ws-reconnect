@@ -235,5 +235,76 @@ test('ws', t1 => {
 			ws.close();
 			wss.close();
 		});
+
+		t2.test('url can be a function', t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			const ws = ReconnectingWebSocket(() => `ws://localhost:${port}`);
+
+			ws.on('open', () => {
+				t.pass('opened');
+				t.end();
+				ws.close();
+				wss.close();
+			});
+		});
+
+		t2.test('url can be a function that returns a promise', t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			const ws = ReconnectingWebSocket(() =>
+				Promise.resolve(`ws://localhost:${port}`),
+			);
+
+			ws.on('open', () => {
+				t.pass('opened');
+				t.end();
+				ws.close();
+				wss.close();
+			});
+		});
+
+		t2.test('emits error when url resolver fails', async t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			const ws = ReconnectingWebSocket(() =>
+				Promise.reject(new Error('Some database error')),
+			);
+
+			ws.on('error', err => {
+				t.equal(err.message, 'Failed to resolve the socket url');
+				t.end();
+				ws.close();
+				wss.close();
+			});
+		});
+
+		t2.test('reconnects after url resolver error', t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			let errCount = 0;
+			let attempt = 0;
+			const ws = ReconnectingWebSocket(() => {
+				// Throw on first attempt. Succeed on retry.
+				attempt += 1;
+				return attempt === 1
+					? Promise.reject(new Error('Some database error'))
+					: Promise.resolve(`ws://localhost:${port}`);
+			});
+
+			ws.on('error', err => {
+				if (err.message === 'Failed to resolve the socket url') {
+					errCount += 1;
+				}
+			});
+
+			ws.on('open', () => {
+				t.equal(errCount, 1);
+				t.pass('opened');
+				t.end();
+				ws.close();
+				wss.close();
+			});
+		});
 	});
 });

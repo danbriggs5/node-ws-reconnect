@@ -3,12 +3,15 @@ const Hoek = require('hoek');
 const Joi = require('joi');
 const WebSocket = require('ws');
 
+const urlSchema = Joi.alternatives().try(Joi.string(), Joi.func());
+
 const defaultSettings = {
 	connectionTimeout: 5 * 1000,
 	heartbeatInterval: 15 * 1000,
 	heartbeatTimeout: 5 * 1000,
 	maxReconnectDelay: 5 * 60 * 1000,
 	minReconnectDelay: 1000,
+	reconnectDelayMultiplier: 2,
 };
 
 const positiveIntSchema = Joi.number()
@@ -21,12 +24,18 @@ const settingsSchema = Joi.object({
 	heartbeatTimeout: positiveIntSchema.required(),
 	maxReconnectDelay: positiveIntSchema.required(),
 	minReconnectDelay: positiveIntSchema.required(),
-}).required();
+	reconnectDelayMultiplier: positiveIntSchema.required(),
+});
 
 module.exports = (url, options = {}) => {
 	const settings = Hoek.applyToDefaults(defaultSettings, options);
 
-	Joi.assert(settings, settingsSchema, 'Invalid ReconnectingSocket options');
+	Joi.assert(url, urlSchema.required(), 'Invalid url');
+	Joi.assert(
+		settings,
+		settingsSchema.required(),
+		'Invalid ReconnectingSocket options',
+	);
 
 	let connectionTimeout;
 	let heartbeatInterval;
@@ -107,17 +116,38 @@ module.exports = (url, options = {}) => {
 	}
 
 	function connect() {
-		ws = new WebSocket(url);
-		ws.on('open', onOpen);
-		ws.on('message', onMessage);
-		ws.on('pong', onPong);
-		ws.on('error', onError);
-		ws.on('close', onClose);
+		// 'url' may be a string, function, or function that returns a promise
+		let prom = typeof url === 'function' ? url() : url;
+		if (!(prom instanceof Promise)) {
+			prom = Promise.resolve(prom);
+		}
 
-		connectionTimeout = setTimeout(() => {
-			reconnect(); // eslint-disable-line no-use-before-define
-			emitter.emit('error', new Error('Timed out waiting to connect'));
-		}, settings.connectionTimeout);
+		prom
+			.then(actualUrl => {
+				if (isClosed) {
+					return;
+				}
+				Joi.assert(actualUrl, Joi.string().required(), 'Invalid url');
+
+				ws = new WebSocket(actualUrl);
+				ws.on('open', onOpen);
+				ws.on('message', onMessage);
+				ws.on('pong', onPong);
+				ws.on('error', onError);
+				ws.on('close', onClose);
+
+				connectionTimeout = setTimeout(() => {
+					reconnect(); // eslint-disable-line no-use-before-define
+					emitter.emit('error', new Error('Timed out waiting to connect'));
+				}, settings.connectionTimeout);
+			})
+			.catch(() => {
+				if (isClosed) {
+					return;
+				}
+				reconnect(); // eslint-disable-line no-use-before-define
+				emitter.emit('error', new Error('Failed to resolve the socket url'));
+			});
 	}
 
 	function cleanup(code) {
@@ -125,22 +155,27 @@ module.exports = (url, options = {}) => {
 		clearTimeout(heartbeatTimeout);
 		clearInterval(heartbeatInterval);
 		clearTimeout(reconnectTimeout);
-		ws.removeAllListeners();
+		if (ws) {
+			ws.removeAllListeners();
 
-		// ws.close() will throw if socket hasn't been opened yet. We will have removed the error
-		// listener before calling ws.close() so this error become an unhandled promise rejection
-		// if we don't catch it here.
-		try {
-			ws.close(code);
-		} catch (err) {
-			// noop
+			// ws.close() will throw if socket hasn't been opened yet. We will have removed the error
+			// listener before calling ws.close() so this error become an unhandled promise rejection
+			// if we don't catch it here.
+			try {
+				ws.close(code);
+			} catch (err) {
+				// noop
+			}
 		}
 	}
 
 	function reconnect(code = 1000) {
 		cleanup(code);
 		reconnectTimeout = setTimeout(connect, reconnectDelay);
-		reconnectDelay = Math.min(reconnectDelay * 2, settings.maxReconnectDelay);
+		reconnectDelay = Math.min(
+			reconnectDelay * settings.reconnectDelayMultiplier,
+			settings.maxReconnectDelay,
+		);
 	}
 
 	function close(code = 1000) {
