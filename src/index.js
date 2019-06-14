@@ -10,6 +10,7 @@ const defaultSettings = {
 	heartbeatInterval: 15 * 1000,
 	heartbeatTimeout: 5 * 1000,
 	maxReconnectDelay: 5 * 60 * 1000,
+	messageBuffering: true,
 	minReconnectDelay: 1000,
 	reconnectDelayMultiplier: 2,
 };
@@ -23,6 +24,7 @@ const settingsSchema = Joi.object({
 	heartbeatInterval: positiveIntSchema.required(),
 	heartbeatTimeout: positiveIntSchema.required(),
 	maxReconnectDelay: positiveIntSchema.required(),
+	messageBuffering: Joi.boolean().required(),
 	minReconnectDelay: positiveIntSchema.required(),
 	reconnectDelayMultiplier: positiveIntSchema.required(),
 });
@@ -45,25 +47,19 @@ module.exports = (url, options = {}) => {
 	let ws;
 	let isClosed = false;
 	let shouldIgnorePongs = false;
+	let msgBuffer = [];
 	const emitter = new Emitter();
 
-	function parseJsonDict(json) {
-		try {
-			const dict = JSON.parse(json);
-			return dict instanceof Object ? dict : {};
-		} catch (err) {
-			return {};
-		}
-	}
-
 	function isOpen() {
-		return ws.readyState === WebSocket.OPEN;
+		return !!ws && ws.readyState === WebSocket.OPEN;
 	}
 
 	// Drop messages if the socket is not open
 	function send(body) {
 		if (isOpen()) {
-			ws.send(JSON.stringify(body));
+			ws.send(body);
+		} else if (settings.messageBuffering) {
+			msgBuffer.push(body);
 		}
 	}
 
@@ -90,11 +86,16 @@ module.exports = (url, options = {}) => {
 
 		// Reset the reconnect delay on successful connection
 		reconnectDelay = settings.minReconnectDelay;
+
+		const msgBufferClone = [...msgBuffer];
+		msgBuffer = [];
+		msgBufferClone.forEach(send);
+
 		emitter.emit('open');
 	}
 
-	function onMessage(json) {
-		emitter.emit('message', parseJsonDict(json));
+	function onMessage(msg) {
+		emitter.emit('message', msg);
 	}
 
 	function onPong() {

@@ -28,6 +28,27 @@ test('ws', t1 => {
 
 			ws = ReconnectingWebSocket(`ws://localhost:${port}`);
 		});
+
+		t2.test('receives messages from the client', t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			let ws;
+			const msg = JSON.stringify({ test: '123' });
+
+			wss.on('connection', socket => {
+				socket.on('message', receivedMsg => {
+					t.deepEqual(receivedMsg, msg);
+					ws.close();
+					wss.close();
+					t.end();
+				});
+			});
+
+			ws = ReconnectingWebSocket(`ws://localhost:${port}`);
+			ws.on('open', () => {
+				ws.send(msg);
+			});
+		});
 	});
 
 	t1.test('client', t2 => {
@@ -43,6 +64,53 @@ test('ws', t1 => {
 				wss.close();
 			});
 		});
+
+		t2.test('client messages are buffer if the socket is closed', t => {
+			const port = getUniquePort();
+			const wss = new WebSocketServer({ port });
+			let ws;
+			const msg = 'test';
+
+			wss.on('connection', socket => {
+				socket.on('message', receivedMsg => {
+					t.deepEqual(receivedMsg, msg);
+					ws.close();
+					wss.close();
+					t.end();
+				});
+			});
+
+			ws = ReconnectingWebSocket(`ws://localhost:${port}`);
+			ws.send(msg); // Send before the socket opens
+		});
+
+		t2.test(
+			`client messages are dropped if the socket is closed and 'messageBuffering' is false`,
+			t => {
+				const port = getUniquePort();
+				const wss = new WebSocketServer({ port });
+				const msg = 'test';
+				let msgCount = 0;
+
+				wss.on('connection', socket => {
+					socket.on('message', () => {
+						msgCount += 1;
+					});
+				});
+
+				const ws = ReconnectingWebSocket(`ws://localhost:${port}`, {
+					messageBuffering: false,
+				});
+				ws.send(msg); // Send before the socket opens
+				ws.on('open', async () => {
+					await delay(200);
+					t.equal(msgCount, 0);
+					ws.close();
+					wss.close();
+					t.end();
+				});
+			},
+		);
 
 		t2.test('does not open if server is not running', async t => {
 			const port = getUniquePort();
