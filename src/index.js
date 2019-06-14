@@ -50,15 +50,6 @@ module.exports = (url, options = {}) => {
 	let msgBuffer = [];
 	const emitter = new Emitter();
 
-	function parseJsonDict(json) {
-		try {
-			const dict = JSON.parse(json);
-			return dict instanceof Object ? dict : {};
-		} catch (err) {
-			return {};
-		}
-	}
-
 	function isOpen() {
 		return !!ws && ws.readyState === WebSocket.OPEN;
 	}
@@ -66,7 +57,7 @@ module.exports = (url, options = {}) => {
 	// Drop messages if the socket is not open
 	function send(body) {
 		if (isOpen()) {
-			ws.send(JSON.stringify(body));
+			ws.send(body);
 		} else if (settings.messageBuffering) {
 			msgBuffer.push(body);
 		}
@@ -103,8 +94,8 @@ module.exports = (url, options = {}) => {
 		emitter.emit('open');
 	}
 
-	function onMessage(json) {
-		emitter.emit('message', parseJsonDict(json));
+	function onMessage(msg) {
+		emitter.emit('message', msg);
 	}
 
 	function onPong() {

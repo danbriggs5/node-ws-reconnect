@@ -33,11 +33,11 @@ test('ws', t1 => {
 			const port = getUniquePort();
 			const wss = new WebSocketServer({ port });
 			let ws;
-			const msg = { test: '123' };
+			const msg = JSON.stringify({ test: '123' });
 
 			wss.on('connection', socket => {
 				socket.on('message', receivedMsg => {
-					t.deepEqual(JSON.parse(receivedMsg), msg);
+					t.deepEqual(receivedMsg, msg);
 					ws.close();
 					wss.close();
 					t.end();
@@ -69,11 +69,11 @@ test('ws', t1 => {
 			const port = getUniquePort();
 			const wss = new WebSocketServer({ port });
 			let ws;
-			const msg = { test: '123' };
+			const msg = 'test';
 
 			wss.on('connection', socket => {
 				socket.on('message', receivedMsg => {
-					t.deepEqual(JSON.parse(receivedMsg), msg);
+					t.deepEqual(receivedMsg, msg);
 					ws.close();
 					wss.close();
 					t.end();
@@ -89,7 +89,7 @@ test('ws', t1 => {
 			t => {
 				const port = getUniquePort();
 				const wss = new WebSocketServer({ port });
-				const msg = { test: '123' };
+				const msg = 'test';
 				let msgCount = 0;
 
 				wss.on('connection', socket => {
